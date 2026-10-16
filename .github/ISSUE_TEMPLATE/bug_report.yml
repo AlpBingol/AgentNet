@@ -1,0 +1,16 @@
+name: Bug report
+description: Something doesn't work as expected
+title: "Bug: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes: {label: What happened?}
+    validations: {required: true}
+  - type: textarea
+    attributes: {label: What did you expect?}
+  - type: textarea
+    attributes: {label: Steps to reproduce, value: "1. "}
+  - type: textarea
+    attributes:
+      label: Logs (optional)
+      description: Paste them yourself if you want to share them. Nothing is attached automatically.

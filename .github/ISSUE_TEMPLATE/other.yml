@@ -1,0 +1,8 @@
+name: Other
+description: Any other feedback
+title: "Feedback: "
+labels: [feedback]
+body:
+  - type: textarea
+    attributes: {label: Your feedback}
+    validations: {required: true}

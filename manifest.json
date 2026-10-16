@@ -1,0 +1,20 @@
+{
+  "kind": "agentnet-release",
+  "version": "0.1.0",
+  "date": "2026-10-16",
+  "notes": "## AgentNet Alpha 0.1.0\n\nThe first public Alpha of AgentNet: run and coordinate many Claude Code agents from one app.\n\n### What's in it\n- Agents in their own git worktrees, with summoning, live control, Agent Mail, file reservations and Beads.\n- A Task List with a kanban board, schedules, scratch pads and per-agent task reports.\n- Usage-aware wind-down: agents estimate the work left, small tasks finish, the rest save and resume after the reset.\n- Optional model providers (Bedrock, Vertex, Foundry or a gateway), added by you; none are bundled.\n- Shared skills and MCP servers for all later agents, and Claude in Chrome for agents.\n- A welcome tutorial, a Feedback button, and signed updates with an Update button.\n\n### Install\nUbuntu 22.04 / 24.04, Linux Mint or Pop!_OS (x86_64):\n\n```bash\ncurl -fsSLO https://github.com/AlpBingol/AgentNet/releases/latest/download/install.sh\nbash install.sh\n```\n\n### Notes\n- Linux x86_64 only. You need your own Claude Code account.\n- This is pre-release software: back up your work.\n- Every release asset is listed in `SHA256SUMS`, which is signed (`SHA256SUMS.sig`), as is `manifest.json`.",
+  "assets": [
+    {
+      "name": "AgentNet_0.1.0_amd64.deb",
+      "platform": "linux-x64",
+      "sha256": "65a7f5e77a33b6634572842be47dec9188bcf8f164cc362500d96fa80b75e061",
+      "size": 1409702
+    },
+    {
+      "name": "agentnet-alpha-0.1.0-linux-x64.tar.gz",
+      "platform": "linux-x64",
+      "sha256": "9f548c6988d3e8b67ab47045317e9b173090c4151c536f597ec4ceffcb5a12c0",
+      "size": 42340498
+    }
+  ]
+}

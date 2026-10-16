@@ -1,0 +1,10 @@
+name: Feature request
+description: Ask for something AgentNet should do
+title: "Feature request: "
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes: {label: What would you like AgentNet to do?}
+    validations: {required: true}
+  - type: textarea
+    attributes: {label: Why do you need it?}

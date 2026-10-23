@@ -1,20 +1,20 @@
 {
   "kind": "agentnet-release",
-  "version": "0.1.0",
-  "date": "2026-10-16",
-  "notes": "## AgentNet Alpha 0.1.0\n\nThe first public Alpha of AgentNet: run and coordinate many Claude Code agents from one app.\n\n### What's in it\n- Agents in their own git worktrees, with summoning, live control, Agent Mail, file reservations and Beads.\n- A Task List with a kanban board, schedules, scratch pads and per-agent task reports.\n- Usage-aware wind-down: agents estimate the work left, small tasks finish, the rest save and resume after the reset.\n- Optional model providers (Bedrock, Vertex, Foundry or a gateway), added by you; none are bundled.\n- Shared skills and MCP servers for all later agents, and Claude in Chrome for agents.\n- A welcome tutorial, a Feedback button, and signed updates with an Update button.\n\n### Install\nUbuntu 22.04 / 24.04, Linux Mint or Pop!_OS (x86_64):\n\n```bash\ncurl -fsSLO https://github.com/AlpBingol/AgentNet/releases/latest/download/install.sh\nbash install.sh\n```\n\n### Notes\n- Linux x86_64 only. You need your own Claude Code account.\n- This is pre-release software: back up your work.\n- Every release asset is listed in `SHA256SUMS`, which is signed (`SHA256SUMS.sig`), as is `manifest.json`.",
+  "version": "0.1.1",
+  "date": "2026-10-23",
+  "notes": "## AgentNet Alpha 0.1.1\n\n### New\n- **A home Net with a hub.** Connect your own machines (a PC, a laptop, a server) into one Net with one hub. Agents, approvals, human tasks, mail and Beads are shared across them; agents can be started on, and continued on, another machine; a lost machine's agents can be restarted elsewhere. Settings → Net, a Net badge in the top bar and the `agentnet net` commands manage it.\n- **Net-wide leases.** Agents can take a lease on a resource (a port, a test database, a folder) that only one holder at a time may use, across all machines.\n- **Remote terminals.** Open an agent's terminal or a shell on another machine of your Net, and take over an agent's terminal.\n- **Encrypted Net backups** with a one-time recovery code, and restore.\n- **Manual sync of project folders between machines**, with a per-project switch.\n- **Headless install for servers** (`install.sh --headless`), `install.sh --join` for adding a machine to a Net, and a reverse SSH tunnel option for the background service.\n- **Link permissions.** Choose what each linked AgentNet may do on yours: which projects, whether it may start agents, how many, which models, a usage limit and an expiry. A Nodes page shows your machines and links as a live graph.\n- **Private projects.** A \"this machine only\" switch keeps a project from being offered or started on other machines.\n- **Local models through OpenCode** (for example LM Studio), with permission prompts answered from the app.\n- **Bedrock through an AWS SSO profile**, with one-click sign-in renewal.\n- **Project git actions in the app:** status, push, pull, and starting a merger agent by hand.\n- **Unjailed agents** can be started one at a time (with a confirmation); helpers they start always stay jailed.\n- **Names and colours** for your Net and each machine.\n- **Connect Claude Code:** a skill and Agent Mail for your own Claude Code sessions, with an optional admin connection.\n- **Command line parity:** commands for projects, to-dos, schedules, mail, providers, updates, settings, shared tools and scratch pads.\n- **Agent tools** to rewrite or remove a to-do (`update_task`, `remove_task`).\n- **User manual and install guides** for Linux desktop, Linux headless and Windows (WSL2), and a welcome tutorial that points to them.\n\n### Improved\n- Windows is supported through WSL2 only, with the Linux installer; the jail hides `/mnt` and WSL interop.\n- Projects that are not git repositories are set up automatically; agents without a project run in your home folder; a folder browser and a Close project action.\n- Scratch pads: collapse replies, retract blocks to one line, condense threads.\n- Agents started from a pad's task can read that pad.\n- Approvals fall back to the hook's message when the screen shows no prompt.\n- Ubuntu 26.04 is supported as a base; the build links against Ubuntu 22.04's libraries for wider compatibility.\n- The agent jail keeps DNS working on WSL.\n- Tools installed outside the daemon's PATH (npm, nvm, bun folders) are found.\n\n### Fixed\n- A \"merge blocked\" state that stayed after a merger agent had resolved the branch.\n- Agents killing the AgentNet daemon by mistake; the daemon now restarts and resumes after a stray stop.\n- The `agentnet` command doing nothing when started through its `~/.local/bin` link.\n- A flaky backup check and several Net layout problems.\n\n### Notes\n- Linux x86_64 only. You need your own Claude Code account.\n- This is pre-release software: back up your work.\n- Every release asset is listed in `SHA256SUMS`, which is signed (`SHA256SUMS.sig`), as is `manifest.json`.",
   "assets": [
     {
-      "name": "AgentNet_0.1.0_amd64.deb",
+      "name": "agentnet-alpha-0.1.1-linux-x64.tar.gz",
       "platform": "linux-x64",
-      "sha256": "65a7f5e77a33b6634572842be47dec9188bcf8f164cc362500d96fa80b75e061",
-      "size": 1409702
+      "sha256": "e4e1ab928086d56a6a9b7ec7a1db750b58054523a7bb999ef643cda7b3205375",
+      "size": 42605821
     },
     {
-      "name": "agentnet-alpha-0.1.0-linux-x64.tar.gz",
-      "platform": "linux-x64",
-      "sha256": "9f548c6988d3e8b67ab47045317e9b173090c4151c536f597ec4ceffcb5a12c0",
-      "size": 42340498
+      "name": "agentnet-headless-0.1.1-linux-x64.tar.gz",
+      "platform": "linux-x64-headless",
+      "sha256": "ce222bebe10f681fa3ee57932c84d992c6dff4be0412bd2100da60089496896c",
+      "size": 42345839
     }
   ]
 }

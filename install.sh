@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# AgentNet Alpha installer for Ubuntu-based Linux (Ubuntu 22.04 / 24.04, Linux Mint, Pop!_OS).
+# AgentNet Alpha installer for Ubuntu-based Linux (Ubuntu 22.04 / 24.04 / 26.04, Linux Mint, Pop!_OS), and for Windows through
+# Ubuntu in WSL2 (docs/release/INSTALL-WINDOWS.md).
 #
 #   install.sh             install AgentNet and what it needs; asks how (system, user only, or show me the commands)
+#   install.sh --headless  a server install: the headless archive (no UI), no desktop window, the service runs headless
+#                          and keeps running after you log out. Offered by itself when there is no display.
+#   install.sh --join '<join code>'  install, then join a home Net (Settings → Net → Add machine on any machine of it
+#                          makes the code). The hub's certificate is checked against the code before anything is installed.
 #   install.sh doctor      check every prerequisite, the Claude sign-in and the daemon
 #   install.sh update      install the newest release, verify it and restart the service
 #   install.sh uninstall   remove what this script installed; your data stays unless you add --purge
@@ -10,6 +15,7 @@
 # your shell rc files are only touched if you say yes.
 #
 # The in-app Update button calls: install.sh update --archive <verified.tar.gz> --version X.Y.Z --yes --no-restart
+# `update` and `uninstall` remember which kind you installed (headless or desktop).
 # Overrides (environment): AGENTNET_VERSION=<tag> (pin a release), AGENTNET_RELEASE_URL (a mirror laid out as
 # <url>/latest and <url>/<tag>/<asset>), AGENTNET_HOME, AGENTNET_PORT, AGENTNET_INSTALL_MODE=system|user|commands.
 set -euo pipefail
@@ -84,6 +90,7 @@ if [[ -t 0 ]]; then
 elif ! { exec 3</dev/tty; } 2>/dev/null; then
   exec 3<&0
 fi
+HEADLESS=0 # --headless: the server variant (state "variant=headless" remembers it)
 YES=0 # --yes: never ask (update from the app)
 ask() { # ask "question" → $REPLY; fails when the input is closed
   ((YES)) && die "Needs an answer, but --yes was given: $1"
@@ -151,8 +158,11 @@ detect_platform() {
   case "$BASE_CODENAME" in
     jammy) BASE_VER=22.04 ;;
     noble) BASE_VER=24.04 ;;
+    resolute) BASE_VER=26.04 ;;
     *) BASE_VER="" ;;
   esac
+  WSL=0
+  if [[ -e /proc/sys/fs/binfmt_misc/WSLInterop ]] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then WSL=1; fi
   case "$(uname -m)" in
     x86_64 | amd64) ARCH=x64 DEB_ARCH=amd64 GNU_ARCH=x86_64 ;;
     aarch64 | arm64) ARCH=arm64 DEB_ARCH=arm64 GNU_ARCH=aarch64 ;;
@@ -246,11 +256,17 @@ resolve_release() {
   done
   [[ -f "$REL_DIR/SHA256SUMS" || -f "$REL_DIR/manifest.json" ]] || die "Can't download the checksums of release $TAG."
   verify_release "$REL_DIR"
-  TARBALL=$(grep -oE "agentnet-[A-Za-z0-9._+-]*-linux-$ARCH\.tar\.gz\$" "$REL_DIR/SHA256SUMS" | head -n1 || true)
-  [[ -n "$TARBALL" ]] || die "Release $TAG has no build for $(uname -m) yet (Alpha ships x86_64 only)."
+  if ((HEADLESS)); then
+    TARBALL=$(grep -oE "agentnet-headless-[A-Za-z0-9._+-]*-linux-$ARCH\.tar\.gz\$" "$REL_DIR/SHA256SUMS" | head -n1 || true)
+    [[ -n "$TARBALL" ]] || die "Release $TAG has no headless build for $(uname -m) (it has: $(grep -oE 'agentnet-[A-Za-z0-9._+-]*\.tar\.gz' "$REL_DIR/SHA256SUMS" | tr '\n' ' '))."
+  else
+    TARBALL=$(grep -oE "agentnet-[A-Za-z0-9._+-]*-linux-$ARCH\.tar\.gz\$" "$REL_DIR/SHA256SUMS" | grep -v '^agentnet-headless-' | head -n1 || true)
+    [[ -n "$TARBALL" ]] || die "Release $TAG has no build for $(uname -m) yet (Alpha ships x86_64 only)."
+  fi
   VER=${TARBALL%-linux-"$ARCH".tar.gz}
   VER=${VER##*-}
-  DESKTOP_DEB=$(grep -oE "[A-Za-z0-9._+-]+_[0-9][A-Za-z0-9.~+-]*_$DEB_ARCH\.deb\$" "$REL_DIR/SHA256SUMS" | head -n1 || true)
+  DESKTOP_DEB=""
+  ((HEADLESS)) || DESKTOP_DEB=$(grep -oE "[A-Za-z0-9._+-]+_[0-9][A-Za-z0-9.~+-]*_$DEB_ARCH\.deb\$" "$REL_DIR/SHA256SUMS" | head -n1 || true)
 }
 # Commands that download one release asset and check it against the (already verified) SHA256SUMS.
 cmds_fetch() { # cmds_fetch <file>
@@ -288,6 +304,10 @@ replace_release() {
     rm -rf "$rel/.new-$v"
     die "$a is not an AgentNet release (no bin/agentnetd)."
   }
+  if ((HEADLESS)); then # a headless install stays headless, even when the archive (the app's Update) has the UI
+    rm -rf "$rel/.new-$v/lib/ui"
+    touch "$rel/.new-$v/HEADLESS"
+  fi
   prev=""
   [[ -L "$OWN/current" ]] && prev=$(readlink -f "$OWN/current")
   if [[ "$prev" == "$rel/$v" ]]; then # reinstalling the running version: move it aside first
@@ -477,7 +497,13 @@ EOF
   printf 'rm -f %s\n' "$(q "$DESKTOP_DEB")"
 }
 before_desktop() {
+  ((HEADLESS)) && return 1
   [[ -n "$DESKTOP_DEB" ]] || return 1
+  if [[ $WSL == 1 ]]; then
+    info "On Windows, open AgentNet in your Windows browser. The Linux desktop window (through WSLg) is untested."
+    yes_no "Install the Linux desktop window anyway?" n
+    return
+  fi
   graphical || {
     info "No graphical session here: skipping the desktop window. Open AgentNet in a browser instead."
     return 1
@@ -586,6 +612,7 @@ cmds_service() {
   local env=""
   [[ -n "${AGENTNET_HOME:-}" ]] && env+="--home $(q "$AGENTNET_HOME") "
   [[ -n "${AGENTNET_PORT:-}" ]] && env+="--port $(q "$AGENTNET_PORT") "
+  ((HEADLESS)) && env+="--headless "
   printf 'bash %s install %s--exec %s\n' "$(q "$(release_script install-service.sh)")" "$env" "$(q "$OWN/current/bin/agentnetd")"
 }
 before_service() {
@@ -593,7 +620,11 @@ before_service() {
     warn "No systemd user session here, so AgentNet can't run as a service. Start it yourself with: agentnetd"
     return 1
   }
-  info "The user service starts AgentNet when you log in and keeps it running when you close the window."
+  if ((HEADLESS)); then
+    info "The user service runs AgentNet headless (AGENTNET_HEADLESS=1), starts it at boot and keeps it running after you log out."
+  else
+    info "The user service starts AgentNet when you log in and keeps it running when you close the window."
+  fi
   yes_no "Install the AgentNet user service?" y || return 1
   [[ -f "$(release_script install-service.sh)" ]] || {
     bad "This release has no scripts/install-service.sh."
@@ -640,6 +671,87 @@ path_step() {
   fi
 }
 
+# ---- Windows (WSL2, D-037) ------------------------------------------------------------------------------------------
+# On Windows, AgentNet runs in Ubuntu under WSL2. Three things differ from a Linux PC: systemd may be off, WSL stops
+# Ubuntu (and every agent) soon after its last window closes, and nothing starts Ubuntu when Windows starts.
+systemd_running() { [[ "$(ps -p 1 -o comm= 2>/dev/null)" == systemd ]]; }
+wsl_conf_systemd() { grep -qiE '^[[:space:]]*systemd[[:space:]]*=[[:space:]]*true' /etc/wsl.conf 2>/dev/null; }
+check_wslsystemd() { systemd_running || wsl_conf_systemd; }
+cmds_wslsystemd() {
+  cat <<'EOF'
+if grep -q '^\[boot\]' /etc/wsl.conf 2>/dev/null; then sudo sed -i '/^[[:space:]]*systemd[[:space:]]*=/d; /^\[boot\]/a systemd=true' /etc/wsl.conf; else printf '\n[boot]\nsystemd=true\n' | sudo tee -a /etc/wsl.conf >/dev/null; fi
+EOF
+}
+after_wslsystemd() { mark_installed wslsystemd; }
+wsl_restart_needed() { # systemd is configured but not running yet: WSL must restart, which ends this shell
+  [[ $WSL == 1 ]] && ! systemd_running && wsl_conf_systemd || return 1
+  head1 "Restart WSL"
+  info "systemd is now turned on in /etc/wsl.conf. It starts with WSL, so WSL has to restart once."
+  info "Close this window, then in Windows PowerShell run:"
+  show_cmds "wsl --shutdown"
+  info "Open Ubuntu again and run the installer again: it continues where it stopped."
+  return 0
+}
+me() { printf '%s' "${USER:-$(id -un)}"; }
+check_linger() { [[ "$(loginctl show-user "$(me)" -p Linger --value 2>/dev/null)" == yes ]]; }
+cmds_linger() { printf 'sudo loginctl enable-linger %s\n' "$(q "$(me)")"; }
+after_linger() { mark_installed linger; }
+
+win_env() { # win_env NAME: a Windows environment variable, through WSL's interop
+  local v
+  v=$( (cd /mnt/c 2>/dev/null || cd /; cmd.exe /d /c "echo %$1%") 2>/dev/null | tr -d '\r')
+  [[ -n "$v" && "$v" != "%$1%" ]] && printf '%s' "$v"
+}
+win_path() {
+  local v
+  v=$(win_env "$1") && wslpath -u "$v"
+}
+wslconfig_file() {
+  local p
+  p=$(win_path USERPROFILE) && printf '%s/.wslconfig' "$p"
+}
+wsl_startup_file() {
+  local p
+  p=$(win_path APPDATA) && printf '%s/Microsoft/Windows/Start Menu/Programs/Startup/agentnet-wsl.cmd' "$p"
+}
+check_wslidle() {
+  local f
+  f=$(wslconfig_file) && grep -qiE '^[[:space:]]*instanceIdleTimeout[[:space:]]*=[[:space:]]*-1' "$f" 2>/dev/null
+}
+check_wslstart() {
+  local f
+  f=$(wsl_startup_file) && [[ -f "$f" ]]
+}
+check_wslkeep() { check_wslidle && check_wslstart; }
+cmds_wslkeep() {
+  local cfg start
+  if ! cfg=$(wslconfig_file) || ! start=$(wsl_startup_file); then
+    printf '# Windows interop is not available here: do step 3 of docs/release/INSTALL-WINDOWS.md by hand.\nfalse\n'
+    return 0
+  fi
+  cat <<EOF
+f=$(q "$cfg")
+touch "\$f"
+if grep -qiE '^[[:space:]]*instanceIdleTimeout[[:space:]]*=' "\$f"; then sed -i -E 's/^[[:space:]]*instanceIdleTimeout[[:space:]]*=.*/instanceIdleTimeout=-1/I' "\$f"
+elif grep -qiE '^\[general\]' "\$f"; then sed -i -E '/^\[general\]/I a instanceIdleTimeout=-1' "\$f"
+else printf '\n[general]\ninstanceIdleTimeout=-1\n' >> "\$f"; fi
+printf '@echo off\r\nrem Starts Ubuntu (WSL) at logon so AgentNet keeps running. Added by the AgentNet installer: delete this file to stop it.\r\nstart "" /min wsl.exe -d %s --exec /bin/true\r\n' $(q "$WSL_DISTRO_NAME") > $(q "$start")
+EOF
+}
+before_wslkeep() {
+  [[ -n "${WSL_DISTRO_NAME:-}" ]] || {
+    warn "WSL_DISTRO_NAME isn't set, so I can't tell which Ubuntu to start. Do step 3 of INSTALL-WINDOWS.md by hand."
+    return 1
+  }
+  info "WSL stops Ubuntu about 15 s after its last window closes, which stops AgentNet and every agent."
+  info "This sets instanceIdleTimeout=-1 in your Windows .wslconfig (all your WSL distributions stay up until"
+  info "\"wsl --shutdown\" or a reboot), and adds agentnet-wsl.cmd to your Windows Startup folder, which starts"
+  info "$WSL_DISTRO_NAME when you log in to Windows. No admin rights needed. It takes effect after the next \"wsl --shutdown\"."
+  yes_no "Set that up?" y
+}
+after_wslkeep() { mark_installed wslkeep; }
+open_in_windows() { powershell.exe -NoProfile -NonInteractive -Command "Start-Process '$1'" >/dev/null 2>&1; } # our own URL: no quotes in it
+
 # ---- doctor ---------------------------------------------------------------------------------------------------------
 daemon_up() { curl -fs -o /dev/null --max-time 3 "http://127.0.0.1:$PORT/"; }
 wait_for_daemon() {
@@ -653,6 +765,7 @@ wait_for_daemon() {
 doctor() {
   detect_platform
   local fails=0 v
+  [[ "$(state_get variant)" == headless ]] && HEADLESS=1
   check() { # check <required:1|0> <label> <command…>
     local req=$1 label=$2
     shift 2
@@ -671,6 +784,13 @@ doctor() {
   else
     warn "System: $OS_NAME, $(uname -m): not Ubuntu-based, unsupported in Alpha"
   fi
+  if [[ $WSL == 1 ]]; then
+    ok "Windows: Ubuntu in WSL${WSL_DISTRO_NAME:+ ($WSL_DISTRO_NAME)}"
+    check 1 "systemd running in WSL" systemd_running
+    check 0 "user service keeps running without a login (loginctl linger)" check_linger
+    check 0 "WSL doesn't stop Ubuntu when idle (instanceIdleTimeout=-1 in .wslconfig)" check_wslidle
+    check 0 "Ubuntu starts when you log in to Windows (Startup folder)" check_wslstart
+  fi
   check 1 "git" have git
   check 1 "curl" have curl
   check 1 "bubblewrap (bwrap)" have bwrap
@@ -680,9 +800,14 @@ doctor() {
   v=$(installed_version)
   check 1 "AgentNet ${v:-not installed}${v:+ ($OWN/current)}" test -n "$v"
   check 1 "agentnetd on the command line ($BIN_DIR)" have agentnetd
-  if was_installed desktop; then check 0 "desktop window" have_desktop; fi
+  if ((HEADLESS)); then
+    ok "Headless install (no UI, no desktop window expected)"
+    check 1 "the headless build is in place (no lib/ui in $OWN/current)" test ! -d "$OWN/current/lib/ui"
+    if has_user_systemd; then check 1 "service keeps running after logout (loginctl linger)" check_linger; fi
+  elif was_installed desktop; then check 0 "desktop window" have_desktop; fi
   check 1 "Claude Code ($(claude --version 2>/dev/null | head -n1 || echo 'not installed'))" have claude
-  check 1 "Claude Code signed in" claude_signed_in
+  # A headless server may sign in through AWS SSO for Bedrock instead of Claude: only a hint there.
+  check "$((HEADLESS ? 0 : 1))" "Claude Code signed in (or AWS SSO for Bedrock, set up in a provider)" claude_signed_in
   check 1 "uv" have uv
   check 1 "MCP Agent Mail ($MAIL_DIR)" check_mail
   check 1 "Beads ($(bd --version 2>/dev/null | head -n1 || echo 'bd not installed'))" have bd
@@ -700,6 +825,21 @@ doctor() {
   fi
   ok "Everything AgentNet needs is in place."
 }
+headless_next_steps() {
+  head1 "Next steps (headless)"
+  say "  1. Check it:               ${B}agentnet status${N}   (it says \"headless\")"
+  say "  2. Add a project:          ${B}agentnet projects add <path>${N}   (a git repo; --init makes one)"
+  say "  3. Sign in to a provider:"
+  say "       Claude:               ${B}claude${N}   (type /login, follow the link, then /exit)"
+  say "       AWS SSO for Bedrock:  ${B}aws configure sso${N} then ${B}aws sso login --use-device-code --no-browser${N}"
+  say "                             and give the Bedrock provider that AWS_PROFILE (needs the AWS CLI v2 here)"
+  say "  4. Connect this machine to the office Net (a link, for now):"
+  say "       here:                 ${B}agentnet grants allow <controller name>${N}   (prints its token once)"
+  say "                             then ${B}agentnet grants set <id> projects=<repo> summon=on models=sonnet efforts=medium${N}"
+  say "       on the controller:    ${B}scripts/install-service.sh tunnel <link-name> $(me)@<this-host> <local-port>${N}"
+  say "                             then ${B}agentnet link add <link-name> http://127.0.0.1:<local-port> <token>${N}"
+  say "  Check everything again:    bash $OWN/install.sh doctor"
+}
 have_desktop() { have agentnet-desktop || [[ -n "$(state_get desktop_pkg)" ]]; }
 
 how_to_open() {
@@ -709,7 +849,12 @@ how_to_open() {
     say "  • Start the daemon first: ${B}agentnetd${N} (or log in again if you installed the service)."
   fi
   if was_installed desktop; then say "  • Start ${B}AgentNet${N} from your applications menu."; fi
-  if [[ -f "$tok" ]]; then
+  if [[ -f "$tok" && $WSL == 1 ]]; then
+    say "  • In your Windows browser: ${B}http://127.0.0.1:$PORT/#token=$(cat "$tok")${N}"
+    if daemon_up && yes_no "Open it in your Windows browser now?" y; then
+      open_in_windows "http://127.0.0.1:$PORT/#token=$(cat "$tok")" || warn "Couldn't open it from here: copy the link."
+    fi
+  elif [[ -f "$tok" ]]; then
     say "  • Or in a browser: ${B}http://127.0.0.1:$PORT/#token=$(cat "$tok")${N}"
   else
     say "  • Or in a browser: http://127.0.0.1:$PORT/ (the link with your token is in $tok once it has started)"
@@ -749,6 +894,12 @@ choose_mode() {
 system_root_part() {
   local todo=() i all=""
   check_pkgs || todo+=(pkgs)
+  if [[ $WSL == 1 ]]; then
+    check_wslsystemd || todo+=(wslsystemd)
+    if systemd_running && ! check_linger; then todo+=(linger); fi
+  elif ((HEADLESS)) && has_user_systemd && ! check_linger; then
+    todo+=(linger)
+  fi
   # Without bwrap yet, judge by the sysctl; checked again once bwrap is installed.
   if userns_restricted && { ! have bwrap || ! bwrap_works; }; then todo+=(apparmor); fi
   if ((${#todo[@]} == 0)); then
@@ -760,6 +911,8 @@ system_root_part() {
   for i in "${todo[@]}"; do
     case $i in
       pkgs) all+="$(cmds_pkgs)"$'\n' ;;
+      wslsystemd) all+="# WSL: turn systemd on"$'\n'"$(cmds_wslsystemd)"$'\n' ;;
+      linger) all+="# keep the AgentNet service running without a login"$'\n'"$(cmds_linger)"$'\n' ;;
       apparmor) all+="# only if bwrap still can't build its sandbox after that:"$'\n'"$(cmds_apparmor)"$'\n' ;;
     esac
   done
@@ -771,6 +924,14 @@ system_root_part() {
   for i in "${todo[@]}"; do
     case $i in
       pkgs) { run_snippet "$(cmds_pkgs)" && check_pkgs; } || die "Installing the packages failed." ;;
+      wslsystemd)
+        { run_snippet "$(cmds_wslsystemd)" && check_wslsystemd; } || die "Turning systemd on in /etc/wsl.conf failed."
+        after_wslsystemd
+        ;;
+      linger)
+        { run_snippet "$(cmds_linger)" && check_linger; } || die "loginctl enable-linger failed."
+        after_linger
+        ;;
       apparmor)
         if apparmor_needed; then
           { run_snippet "$(cmds_apparmor)" && bwrap_works; } || die "bwrap still can't build its sandbox."
@@ -785,28 +946,98 @@ system_root_part() {
   ok "Root part done"
 }
 
+# ---- join a home Net (R-1807) ---------------------------------------------------------------------------------------
+# Join code: agentnet-join:1:<host:port>[,<host:port>…]:<ane1_token>:<CA sha256 hex>. The hub's CA isn't trusted yet,
+# so it is downloaded with curl -k and its SHA-256 (DER) must match the code: that is what proves it is your hub.
+JOIN_CODE=""
+join_check() {
+  local code=$1 rest fp addrs addr pem got
+  [[ $code == agentnet-join:1:* ]] || die "--join: that isn't an AgentNet join code (it starts with agentnet-join:1:)."
+  have openssl || die "--join needs openssl to check the hub's certificate: sudo apt-get install -y openssl"
+  fp=${code##*:}
+  rest=${code#agentnet-join:1:}
+  rest=${rest%:*}  # drop the fingerprint
+  addrs=${rest%:*} # drop the enroll token
+  [[ ${#fp} == 64 && -n $addrs ]] || die "--join: the join code is damaged."
+  for addr in ${addrs//,/ }; do
+    pem=$(curl -fsSk --max-time 10 "https://$addr/net/ca" 2>/dev/null) || {
+      warn "The hub at $addr didn't answer."
+      continue
+    }
+    got=$(printf '%s\n' "$pem" | openssl x509 -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)
+    if [[ $got != "${fp,,}" ]]; then
+      die "The hub at $addr has a different certificate than the join code (${got:0:8}…${got: -8} instead of ${fp:0:8}…${fp: -8}). That isn't your hub: nothing was installed."
+    fi
+    ok "The hub at $addr has the certificate the join code names"
+    return 0
+  done
+  die "No hub address in the join code answered ($addrs). Is the hub running and on this network?"
+}
+join_net() {
+  if ! check_service || [[ $MODE == commands ]] || ! wait_for_daemon; then
+    warn "Join the Net once AgentNet runs:"
+    say "  agentnet net join '$JOIN_CODE'"
+    return 0
+  fi
+  if "$OWN/current/bin/agentnet" net join "$JOIN_CODE"; then
+    ok "Joined the Net"
+  else
+    warn "Joining the Net failed (above). Make a new code with Add machine and run: agentnet net join '<join code>'"
+  fi
+}
+
 install_main() {
+  while (($#)); do
+    case "$1" in
+      --join)
+        (($# >= 2)) || die "--join needs the join code"
+        JOIN_CODE=$2 && shift
+        ;;
+      --headless) HEADLESS=1 ;;
+      --desktop) HEADLESS=0 DESKTOP_FORCED=1 ;;
+      *) die "install: unknown option $1" ;;
+    esac
+    shift
+  done
   detect_platform
   head1 "AgentNet Alpha installer"
   [[ -n "$ARCH" ]] || die "Unsupported CPU: $(uname -m)."
   info "System: $OS_NAME ($(uname -m))"
+  if [[ $WSL == 1 ]]; then info "Windows: Ubuntu in WSL${WSL_DISTRO_NAME:+ ($WSL_DISTRO_NAME)}. You'll open AgentNet in your Windows browser."; fi
   if [[ $UBUNTU_BASED == 0 ]]; then
     warn "$OS_NAME is not Ubuntu-based. AgentNet Alpha supports only Ubuntu-based Linux (Ubuntu, Mint, Pop!_OS)."
     info "The \"show me the commands\" mode still works: adapt the package commands to your system."
   elif [[ -z "$BASE_VER" ]]; then
-    warn "Ubuntu base \"$BASE_CODENAME\" is not one we test (22.04 jammy, 24.04 noble). It will probably work."
+    warn "Ubuntu base \"$BASE_CODENAME\" is not one we test (22.04 jammy, 24.04 noble, 26.04 resolute). It will probably work."
   fi
   have curl || die "curl is needed: sudo apt-get install -y curl"
+  if [[ -n $JOIN_CODE ]]; then join_check "$JOIN_CODE"; fi
+  if ((!HEADLESS)) && [[ -z "${DESKTOP_FORCED:-}" ]]; then
+    if [[ "${AGENTNET_INSTALL_VARIANT:-}" == headless ]]; then
+      HEADLESS=1
+    elif [[ -z "${AGENTNET_INSTALL_VARIANT:-}" && $WSL == 0 ]] && ! graphical; then
+      info "No graphical session here (no DISPLAY or WAYLAND_DISPLAY): this looks like a server."
+      yes_no "Install the headless build (no UI and no desktop window; you use the agentnet command)?" y && HEADLESS=1
+    fi
+  fi
+  if ((HEADLESS)); then info "Headless install: the archive without the UI, no desktop window, a service that survives logout."; fi
   choose_mode
   resolve_release
   info "AgentNet $VER (release $TAG from ${AGENTNET_RELEASE_URL:-github.com/$RELEASE_REPO})"
   state_set mode "$MODE"
+  state_set variant "$( ((HEADLESS)) && echo headless || echo desktop)"
 
   if [[ $MODE == system ]]; then
     system_root_part
   else
     step pkgs "Packages: git, curl, bubblewrap" 1
     step apparmor "AppArmor profile for bubblewrap" 1
+    if [[ $WSL == 1 ]]; then step wslsystemd "WSL: systemd" 1; fi
+  fi
+  if wsl_restart_needed; then exit 0; fi
+  if [[ $WSL == 1 && $MODE != system ]]; then step linger "WSL: keep the service running without a login (linger)" 1; fi
+  if [[ $WSL == 0 && $MODE != system ]] && ((HEADLESS)) && has_user_systemd; then
+    step linger "Keep the service running after you log out (linger)" 1
   fi
   if [[ $MODE == commands ]]; then
     step app "AgentNet $VER" 0
@@ -818,8 +1049,8 @@ install_main() {
     after_app
     ok "AgentNet $VER in $OWN/current"
   fi
-  step desktop "AgentNet desktop window" "$([[ $MODE == system ]] && echo 1 || echo 0)"
-  if [[ $MODE != system ]] && was_installed desktop; then
+  if ((!HEADLESS)); then step desktop "AgentNet desktop window" "$([[ $MODE == system ]] && echo 1 || echo 0)"; fi
+  if ((!HEADLESS)) && [[ $MODE != system ]] && was_installed desktop; then
     step desktoplibs "Libraries for the desktop window (WebKitGTK)" 1
   fi
   step claude "Claude Code" 0
@@ -828,14 +1059,16 @@ install_main() {
   step bd "Beads (bd $BD_VERSION)" 0
   step nats "nats-server (optional)" 0
   step service "AgentNet user service (optional)" 0
-  login_step
+  if [[ $WSL == 1 ]]; then step wslkeep "WSL: keep Ubuntu running, and start it at Windows logon" 0; fi
+  ((HEADLESS)) || login_step
   path_step
   if check_service && [[ $MODE != commands ]]; then
     systemctl --user restart "$SERVICE.service" || true
     wait_for_daemon || warn "The service isn't answering on port $PORT yet. See: journalctl --user -u $SERVICE"
   fi
   doctor || true
-  how_to_open
+  if [[ -n $JOIN_CODE ]]; then join_net; fi
+  if ((HEADLESS)); then headless_next_steps; else how_to_open; fi
 }
 
 # ---- update ---------------------------------------------------------------------------------------------------------
@@ -867,6 +1100,7 @@ update_main() {
   detect_platform
   MODE=$(state_get mode)
   MODE=${MODE:-user}
+  [[ "$(state_get variant)" == headless ]] && HEADLESS=1
   [[ -x "$OWN/current/bin/agentnetd" ]] || die "AgentNet wasn't installed by this script ($OWN/current is missing)."
   cur=$(installed_version)
   prev=$(readlink -f "$OWN/current")
@@ -899,7 +1133,7 @@ update_main() {
 
 # ---- uninstall ------------------------------------------------------------------------------------------------------
 uninstall_main() {
-  local purge=0 b list="AgentNet" pkg
+  local purge=0 b list="AgentNet" pkg f
   [[ "${1:-}" == --purge ]] && purge=1
   detect_platform
   head1 "Uninstall AgentNet"
@@ -909,6 +1143,7 @@ uninstall_main() {
   if was_installed bd; then list+=", bd"; fi
   if was_installed mail; then list+=", MCP Agent Mail"; fi
   if was_installed nats; then list+=", nats-server"; fi
+  if was_installed wslkeep; then list+=", the WSL start-at-logon file"; fi
   say "This removes what the installer put in place: $list."
   say "Claude Code, git, curl and bubblewrap stay (other programs may use them)."
   if ((purge)); then
@@ -944,6 +1179,13 @@ uninstall_main() {
       sudo rm -f "$APPARMOR_PROFILE" && ok "Removed the AppArmor profile"
     fi
   fi
+  if was_installed wslkeep; then
+    if f=$(wsl_startup_file) && [[ -f "$f" ]]; then rm -f "$f" && ok "Removed agentnet-wsl.cmd from your Windows Startup folder"; fi
+    if f=$(wslconfig_file) && [[ -f "$f" ]] && yes_no "Remove instanceIdleTimeout=-1 from your Windows .wslconfig (WSL stops idle distributions again)?" y; then
+      sed -i -E '/^[[:space:]]*instanceIdleTimeout[[:space:]]*=[[:space:]]*-1/Id' "$f" && ok "Removed it from $f"
+    fi
+  fi
+  if was_installed linger; then info "Linger stays on (sudo loginctl disable-linger $(me) turns it off)."; fi
   if was_installed uv; then rm -f "$BIN_DIR/uv" "$BIN_DIR/uvx" && ok "Removed uv"; fi
   if was_installed bd; then rm -f "$BIN_DIR/bd" && ok "Removed bd"; fi
   if was_installed mail; then rm -rf "$MAIL_DIR" && ok "Removed MCP Agent Mail"; fi
@@ -963,9 +1205,9 @@ if [[ "$(id -u)" -eq 0 ]]; then
   die "Don't run this script as root or with sudo. Run it as yourself; it asks for sudo only where needed."
 fi
 cmd="${1:-install}"
-(($#)) && shift
+case "$cmd" in --headless | --desktop) cmd=install ;; *) (($#)) && shift ;; esac
 case "$cmd" in
-  install) install_main ;;
+  install) install_main "$@" ;;
   doctor) doctor ;;
   update) update_main "$@" ;;
   uninstall) uninstall_main "$@" ;;

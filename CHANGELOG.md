@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.1.2 (2026-10-29)
+
+## AgentNet Alpha 0.1.2
+
+### New
+
+- **Chat.** A new **Chat** page (top of the sidebar) is a regular chat with Claude inside AgentNet: formatted replies
+  with code blocks you can copy, tool-call cards, Chrome access, and **artifacts** (web pages, SVGs, documents, code)
+  shown in a side panel with live preview. Chats are also in scratch pads (**💬 Chat** in a pad's header) and the
+  command line (`agentnet chats`, `agentnet chat`).
+- **Task List folders.** Organise a project's tasks in nested folders; drag tasks onto folders.
+- **Browser access for headless installs.** `bash install.sh --headless --web` serves the same app to any browser on your
+  local network (private ranges only). `agentnet web` prints the links.
+- **Send to machine.** Hand a project over to another machine of your home Net (Projects page or
+  `agentnet net send`); its waiting tasks go with it.
+- **Start an agent on another machine.** The New agent dialog has Machine and Project pickers
+  (`agentnet start --on <machine>`).
+- **Tasks for projects on other machines** of your Net.
+- **Local model** (experimental): run agents on a local model server through OpenCode, with per-model limits.
+- **Settings → Run every agent without the jail** (off by default, with a confirmation).
+- **A friendlier command line.** `agentnet` alone opens a live console (agents, what needs you, to-dos); `agentnet help`
+  is short and per topic; mistyped commands get suggestions; Tab-completion with `agentnet completion install`.
+
+### Improved
+
+- Your theme and sound choices are also kept by AgentNet itself, so they survive a new browser, port or cleared data.
+- To-dos run on the machine that created them by default; another machine or "any" is opt-in.
+- The New agent dialog's folder browser works on the selected machine and warns when a folder can't be read or written.
+- Restarting a headless service picks up a changed setup (such as `--web`) right away.
+- The installer explains clearly when `--web` isn't supported by an older release.
+- The user manual and the install guides (Linux desktop, Linux headless, Windows with WSL2) were refreshed.
+
+### Fixed
+
+- Publishing and updating releases is more reliable.
+- `agentnet todo add --project` accepts the name of a project on another machine.
+
 ## v0.1.1 (2026-10-23)
 
 ### AgentNet Alpha 0.1.1

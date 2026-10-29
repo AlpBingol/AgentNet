@@ -35,10 +35,26 @@ Open one to:
 
 Normally every agent is jailed. When you start an individual agent you may choose to run it **without the jail**; a
 confirmation appears, the agent shows an UNJAILED badge, and the choice does not carry over to its helpers or to a
-relaunch.
+relaunch. **Settings → Agents → Run every agent without the jail** turns the jail off for all agents on this machine
+(after an *Are you sure?* dialog; off by default). Agents started on a machine through a link always stay jailed.
+
+On a home Net (chapter 9) the New agent dialog also has **Machine** and **Project** pickers, so you can start an agent
+on another machine (`agentnet start --on <machine>`).
 
 **Grid** (the grid icon next to the agents) shows all live agents side by side; finished agents stay as their report
 until you close them. **History** lists closed agents and their reports. **New terminal** opens a plain shell in the app.
+
+### Chat
+
+**Chat** (top of the sidebar) is a regular chat with Claude, inside AgentNet. **＋ New chat**, pick a model and effort
+if you like, and write. Replies show as formatted text with highlighted code (Copy on every block); the agent's tool
+calls show as small cards you can open. It can use your Chrome through Claude in Chrome (in its own tab; screenshots
+show in the chat), and it makes **artifacts**: web pages, demos, SVG drawings, documents and code files, listed in the
+Artifacts panel on the right (◨). Pages and SVGs run there as a live preview, sealed off from AgentNet; **Code** shows
+the source. The composer has the same three modes as an agent: **Queue** (default), **/btw** and **Interrupt**.
+**■ Stop** puts a chat to sleep; your next message wakes it with the whole conversation. ⌨ opens the chat's agent with
+its terminal. Each chat runs as an agent in its own folder on this machine, jailed like any other, and counts toward
+your limits and usage. The CLI has `agentnet chats` and `agentnet chat …`.
 
 ### Summoning and the chain of command
 
@@ -59,13 +75,20 @@ agent stops, the branch and session are kept), resumed, stopped, edited while wa
 History and can be re-added). The same list shows as a **kanban board** in its own window ("Tasks" in the sidebar).
 The default model and effort for task runs are in Settings.
 
+**Folders** structure a project's tasks. Pick a project on the Task List: the tree on the left shows its Task List and
+one list per scratch pad, each with its folders. **+** makes a folder (folders can go inside folders), ✎ renames, ×
+deletes (its tasks move up a level, nothing is lost). Drag a task onto a folder to file it there, or pick a folder in
+the task's editor; picking a folder shows its tasks, and new tasks go into it. The kanban board has a folder pick too.
+
 **Schedules** create tasks on a timer: a cron expression or a single time, in a time zone you choose, with a choice of
 what happens if the machine was off at that time (run once, or skip).
 
 **Scratch pad** is a live document for ideas. Each pad has an agent you can switch on: it asks questions, comments,
 sorts ideas into topics, and can turn ideas into tasks on the Task List (the pad's **Execute** switch decides whether
 those start by themselves). You set what the pad agent may do. Pads have collapsible replies, and blocks can be
-retracted to one line.
+retracted to one line. **💬 Chat** in a pad's header opens a chat with the pad's agent beside the document: messages are
+queued while it works (the default), **/btw** asks a side question without disturbing it, and **Interrupt** stops its
+current turn first.
 
 ## 4. Projects and merging
 
@@ -104,7 +127,8 @@ window resets. You can wind down now, let one agent keep working, or end the win
 - **Connect Claude Code**: gives your own Claude Code an MCP server to list, start, message, interrupt and stop agents.
   Switching it off revokes its token;
 - **Privacy**: AgentNet sends no telemetry;
-- **Themes** and sounds: pick a look for the app;
+- **Themes** and sounds: pick a look for the app (your choice is also kept by AgentNet itself, so it survives a new
+  browser, a new port or cleared browser data);
 - **Providers**: see below.
 
 ### Providers
@@ -125,10 +149,22 @@ the AWS sign-in and show the device link and code.
 
 ## 8. Command line
 
-Everything in the app is also available with `agentnet` (useful over SSH and in scripts). `agentnet help` lists the
-commands; add `--json` to any command for raw output.
+Everything in the app is also available with `agentnet` (useful over SSH and in scripts), on desktop and headless
+installs alike.
+
+- **`agentnet` on its own opens the console:** a live, full-screen view in the terminal with three lists: *Agents*
+  (as a tree), *Needs you* (requests, permission prompts, things agents asked you to do) and *To-dos*. Move with the
+  arrow keys, press Enter to open an agent's live terminal (Ctrl-] comes back), `s` to message it, `n` for a new agent
+  or to-do, `a`/`d` to approve or deny, `:` to type any `agentnet` command, `?` for all keys, `q` to quit.
+- **`agentnet help`** shows the few commands most people need; `agentnet help todo` (any command or area) shows just
+  that part, and `agentnet help all` everything. A mistyped command suggests the right one.
+- **Tab-completion:** run `agentnet completion install` once, then open a new terminal. Tab completes commands,
+  subcommands and agent names.
+- `agentnet start` and `agentnet todo add` without arguments ask for what they need.
+- Add `--json` to any command for raw output (scripts).
 
 ```bash
+agentnet                                      # the console
 agentnet status                               # who is working, what needs you
 agentnet projects add ~/code/app --init
 agentnet todo add "Fix the flaky test" --project app --auto --priority high
@@ -146,8 +182,15 @@ One AgentNet can span your own machines on a home network: an always-on **hub** 
   daily encrypted **backup**. Workers join with a one-time **join code** (valid 24 hours, once; treat it as a secret),
   keep working offline and sync when the hub is back.
 - Each worker keeps one outgoing connection to the hub, so NAT, laptops and WSL2 are fine.
-- Projects are shared in the Net by default; **This machine only** keeps one private. A task can target a machine, with
-  a fallback to the hub.
+- Projects are shared in the Net by default; **This machine only** keeps one private. A task runs on the machine that created it
+  unless you pick another (or *any*), with a fallback to the hub; a task can also be made for a project that lives on
+  another machine.
+- **Send to machine…** (Projects page, or `agentnet net send <project> <machine>`) hands a project over to another
+  machine, so work on it goes on there while this one is off. Its base branch goes to the hub first (so the hub must be
+  reachable; uncommitted changes refuse the send unless you tick *Commit uncommitted changes first*). The other machine
+  makes its own copy and merges finished work from then on, and this machine's waiting tasks for the project move with
+  it. Agents still running here are listed, not moved. When this machine is back, its folder catches up with the work
+  merged over there (only when it has no changes of its own; otherwise the Projects page says so).
 - Terminals of agents and shell sessions on other machines can be opened from the app (the other machine must allow
   terminals).
 - Agents on a machine that is lost or paused can be restarted elsewhere (**Restart on**, **Auto-continue**).

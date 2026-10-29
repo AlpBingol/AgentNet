@@ -3,8 +3,10 @@
 # Ubuntu in WSL2 (docs/release/INSTALL-WINDOWS.md).
 #
 #   install.sh             install AgentNet and what it needs; asks how (system, user only, or show me the commands)
-#   install.sh --headless  a server install: the headless archive (no UI), no desktop window, the service runs headless
+#   install.sh --headless  a server install: the headless archive, no desktop window, the service runs headless
 #                          and keeps running after you log out. Offered by itself when there is no display.
+#   install.sh --headless --web  the same, and the UI is reachable from browsers on the LAN at http://<this IP>:<port>/
+#                          (AGENTNET_WEB=lan; asked on a headless install). `agentnet web` prints the links.
 #   install.sh --join '<join code>'  install, then join a home Net (Settings → Net → Add machine on any machine of it
 #                          makes the code). The hub's certificate is checked against the code before anything is installed.
 #   install.sh doctor      check every prerequisite, the Claude sign-in and the daemon
@@ -17,7 +19,8 @@
 # The in-app Update button calls: install.sh update --archive <verified.tar.gz> --version X.Y.Z --yes --no-restart
 # `update` and `uninstall` remember which kind you installed (headless or desktop).
 # Overrides (environment): AGENTNET_VERSION=<tag> (pin a release), AGENTNET_RELEASE_URL (a mirror laid out as
-# <url>/latest and <url>/<tag>/<asset>), AGENTNET_HOME, AGENTNET_PORT, AGENTNET_INSTALL_MODE=system|user|commands.
+# <url>/latest and <url>/<tag>/<asset>), AGENTNET_HOME, AGENTNET_PORT, AGENTNET_INSTALL_MODE=system|user|commands,
+# AGENTNET_WEB=lan|off (LAN web access for a headless install, like --web; off turns it off again).
 set -euo pipefail
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -91,6 +94,7 @@ elif ! { exec 3</dev/tty; } 2>/dev/null; then
   exec 3<&0
 fi
 HEADLESS=0 # --headless: the server variant (state "variant=headless" remembers it)
+WEB=0 # --web: LAN web access for the service (state "web=lan" remembers it), R-1501a
 YES=0 # --yes: never ask (update from the app)
 ask() { # ask "question" → $REPLY; fails when the input is closed
   ((YES)) && die "Needs an answer, but --yes was given: $1"
@@ -304,8 +308,7 @@ replace_release() {
     rm -rf "$rel/.new-$v"
     die "$a is not an AgentNet release (no bin/agentnetd)."
   }
-  if ((HEADLESS)); then # a headless install stays headless, even when the archive (the app's Update) has the UI
-    rm -rf "$rel/.new-$v/lib/ui"
+  if ((HEADLESS)); then # a headless install stays headless (no desktop window); it keeps lib/ui for the browser UI
     touch "$rel/.new-$v/HEADLESS"
   fi
   prev=""
@@ -607,12 +610,35 @@ before_nats() {
 after_nats() { mark_installed nats; }
 
 has_user_systemd() { systemctl --user show-environment >/dev/null 2>&1; }
-check_service() { systemctl --user is-enabled "$SERVICE.service" >/dev/null 2>&1; }
+service_enabled() { systemctl --user is-enabled "$SERVICE.service" >/dev/null 2>&1; }
+check_service() { service_enabled && service_web_matches; }
+# LAN web access (R-1501a) came after 0.1.1: an older release's install-service.sh has no --web and its daemon ignores
+# AGENTNET_WEB, so it is only applied with a release that has it (and turned on by `update` once one arrives).
+release_has_web() { grep -q -- '--web)' "$(release_script install-service.sh)" 2>/dev/null; }
+web_wanted() { [[ "$(state_get web)" == lan ]] && release_has_web; }
+service_web_matches() { # the unit has AGENTNET_WEB=lan exactly when LAN web access is wanted (else: reinstall the unit)
+  local unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$SERVICE.service" has=0 want=0
+  [[ -f "$unit" ]] || return 0
+  grep -q '^Environment=AGENTNET_WEB=lan$' "$unit" && has=1
+  web_wanted && want=1
+  ((has == want))
+}
+daemon_web_on() { # the running daemon says LAN web access is on (Settings.web)
+  local t
+  t=$(cat "$DATA/nets/default/token" 2>/dev/null) || return 1
+  curl -fs --max-time 3 -H "authorization: Bearer $t" "http://127.0.0.1:$PORT/api/state" | grep -q '"web":true'
+}
+web_not_in_release_note() {
+  warn "AgentNet $(installed_version) has no LAN web access yet: it comes with the next release, and ${B}install.sh update${N} turns it on then."
+  info "To use it now, run AgentNet from a source checkout instead (needs Node.js 22+ and npm):"
+  info "  cd <checkout> && npm install && scripts/install-service.sh install --headless --web"
+}
 cmds_service() {
   local env=""
   [[ -n "${AGENTNET_HOME:-}" ]] && env+="--home $(q "$AGENTNET_HOME") "
   [[ -n "${AGENTNET_PORT:-}" ]] && env+="--port $(q "$AGENTNET_PORT") "
   ((HEADLESS)) && env+="--headless "
+  web_wanted && env+="--web "
   printf 'bash %s install %s--exec %s\n' "$(q "$(release_script install-service.sh)")" "$env" "$(q "$OWN/current/bin/agentnetd")"
 }
 before_service() {
@@ -622,6 +648,8 @@ before_service() {
   }
   if ((HEADLESS)); then
     info "The user service runs AgentNet headless (AGENTNET_HEADLESS=1), starts it at boot and keeps it running after you log out."
+    if ((WEB)) && release_has_web; then info "LAN web access is on: browsers on your LAN open the UI at http://<this machine's IP>:$PORT/ (with the token)."; fi
+    if ((WEB)) && ! release_has_web; then web_not_in_release_note; fi
   else
     info "The user service starts AgentNet when you log in and keeps it running when you close the window."
   fi
@@ -801,8 +829,15 @@ doctor() {
   check 1 "AgentNet ${v:-not installed}${v:+ ($OWN/current)}" test -n "$v"
   check 1 "agentnetd on the command line ($BIN_DIR)" have agentnetd
   if ((HEADLESS)); then
-    ok "Headless install (no UI, no desktop window expected)"
-    check 1 "the headless build is in place (no lib/ui in $OWN/current)" test ! -d "$OWN/current/lib/ui"
+    ok "Headless install (no desktop window expected)"
+    check 0 "the browser UI is installed ($OWN/current/lib/ui; older headless builds have none)" test -d "$OWN/current/lib/ui"
+    if [[ "$(state_get web)" == lan ]]; then
+      if release_has_web; then
+        check 1 "LAN web access on (agentnet web prints the links)" daemon_web_on
+      else
+        warn "LAN web access was asked for, but AgentNet $(installed_version) doesn't have it yet (next release; update turns it on)"
+      fi
+    fi
     if has_user_systemd; then check 1 "service keeps running after logout (loginctl linger)" check_linger; fi
   elif was_installed desktop; then check 0 "desktop window" have_desktop; fi
   check 1 "Claude Code ($(claude --version 2>/dev/null | head -n1 || echo 'not installed'))" have claude
@@ -828,6 +863,18 @@ doctor() {
 headless_next_steps() {
   head1 "Next steps (headless)"
   say "  1. Check it:               ${B}agentnet status${N}   (it says \"headless\")"
+  if ((WEB)) && release_has_web; then
+    say "     Open it in a browser:   ${B}agentnet web${N}   (prints http://<this machine's IP>:$PORT/#token=… for your LAN)"
+    if have ufw; then
+      say "     If ufw is on (${B}sudo ufw status${N}): ${B}sudo ufw allow from <your LAN range> to any port $PORT proto tcp${N} (e.g. the range your router hands out)"
+    fi
+  elif ((WEB)); then
+    say "     Browser UI from the LAN: not in AgentNet $(installed_version) yet (next release; ${B}install.sh update${N} turns it on),"
+    say "                             or now from a source checkout: ${B}npm install && scripts/install-service.sh install --headless --web${N}"
+  else
+    say "     A browser instead:      ${B}ssh -N -L $PORT:127.0.0.1:$PORT $(me)@<this-host>${N} on your PC, then ${B}agentnet web${N} here"
+    say "                             for the link; or reinstall with ${B}--headless --web${N} to open it to your LAN"
+  fi
   say "  2. Add a project:          ${B}agentnet projects add <path>${N}   (a git repo; --init makes one)"
   say "  3. Sign in to a provider:"
   say "       Claude:               ${B}claude${N}   (type /login, follow the link, then /exit)"
@@ -974,7 +1021,7 @@ join_check() {
   die "No hub address in the join code answered ($addrs). Is the hub running and on this network?"
 }
 join_net() {
-  if ! check_service || [[ $MODE == commands ]] || ! wait_for_daemon; then
+  if ! service_enabled || [[ $MODE == commands ]] || ! wait_for_daemon; then
     warn "Join the Net once AgentNet runs:"
     say "  agentnet net join '$JOIN_CODE'"
     return 0
@@ -994,6 +1041,7 @@ install_main() {
         JOIN_CODE=$2 && shift
         ;;
       --headless) HEADLESS=1 ;;
+      --web) WEB=1 ;;
       --desktop) HEADLESS=0 DESKTOP_FORCED=1 ;;
       *) die "install: unknown option $1" ;;
     esac
@@ -1017,15 +1065,25 @@ install_main() {
       HEADLESS=1
     elif [[ -z "${AGENTNET_INSTALL_VARIANT:-}" && $WSL == 0 ]] && ! graphical; then
       info "No graphical session here (no DISPLAY or WAYLAND_DISPLAY): this looks like a server."
-      yes_no "Install the headless build (no UI and no desktop window; you use the agentnet command)?" y && HEADLESS=1
+      yes_no "Install the headless build (no desktop window; you use the agentnet command or a browser)?" y && HEADLESS=1
     fi
   fi
-  if ((HEADLESS)); then info "Headless install: the archive without the UI, no desktop window, a service that survives logout."; fi
+  [[ "${AGENTNET_WEB:-}" == lan || "$(state_get web)" == lan ]] && WEB=1
+  [[ "${AGENTNET_WEB:-}" == off ]] && WEB=0 # AGENTNET_WEB=off turns LAN web access off again
+  if ((HEADLESS)); then
+    info "Headless install: no desktop window, a service that survives logout."
+    if ((!WEB)) && ((!YES)) && [[ $WSL == 0 ]]; then
+      info "LAN web access: the same UI as the desktop app, in any browser on your LAN at http://<this machine's IP>:$PORT/."
+      info "It needs the admin token (in the link) and only accepts private LAN addresses, but it is plain HTTP: use it on a network you trust."
+      yes_no "Open the UI to browsers on your LAN?" n && WEB=1
+    fi
+  fi
   choose_mode
   resolve_release
   info "AgentNet $VER (release $TAG from ${AGENTNET_RELEASE_URL:-github.com/$RELEASE_REPO})"
   state_set mode "$MODE"
   state_set variant "$( ((HEADLESS)) && echo headless || echo desktop)"
+  state_set web "$( ((WEB)) && echo lan || echo off)"
 
   if [[ $MODE == system ]]; then
     system_root_part
@@ -1062,7 +1120,7 @@ install_main() {
   if [[ $WSL == 1 ]]; then step wslkeep "WSL: keep Ubuntu running, and start it at Windows logon" 0; fi
   ((HEADLESS)) || login_step
   path_step
-  if check_service && [[ $MODE != commands ]]; then
+  if service_enabled && [[ $MODE != commands ]]; then
     systemctl --user restart "$SERVICE.service" || true
     wait_for_daemon || warn "The service isn't answering on port $PORT yet. See: journalctl --user -u $SERVICE"
   fi
@@ -1073,7 +1131,11 @@ install_main() {
 
 # ---- update ---------------------------------------------------------------------------------------------------------
 restart_service() { # restart_service <previous release>: restart, and roll back if the new one doesn't come up
-  check_service || return 0
+  service_enabled || return 0
+  # The new release may change what the unit needs (LAN web access arrives with a release): rewrite it first.
+  if ! service_web_matches && [[ -f "$(release_script install-service.sh)" ]]; then
+    run_snippet "$(cmds_service)" >/dev/null && ok "User service updated ($(web_wanted && echo 'LAN web access on' || echo 'LAN web access off'))"
+  fi
   systemctl --user restart "$SERVICE.service"
   wait_for_daemon && return 0
   if [[ -n "$1" && -d "$1" ]]; then

@@ -46,7 +46,8 @@ A headless install has no window: the same features, managed from a browser on a
    agentnet projects add ~/code/app --init
    ```
 
-6. Reach the app from your own computer through an SSH tunnel, then open the link in your browser:
+6. Reach the app from your own computer. Either through an SSH tunnel (nothing else is exposed), then open the link in
+   your browser:
 
    ```bash
    ssh -L 7420:127.0.0.1:7420 user@server
@@ -56,8 +57,23 @@ A headless install has no window: the same features, managed from a browser on a
    echo "http://127.0.0.1:7420/#token=$(cat ~/.agentnet/nets/default/token)"
    ```
 
-   Run the second command on the server and open the printed link on your computer. Everything the app does is also
-   available as `agentnet` commands; `agentnet help` lists them.
+   Run the second command on the server and open the printed link on your computer.
+
+   Or from any browser on your local network, with no tunnel: install with the web option (the installer also asks).
+
+   ```bash
+   bash install.sh --headless --web
+   ```
+
+   Then run `agentnet web` on the server. It prints the links, with the access token, to open in a browser on the same
+   network. Only computers on private network ranges get in, and only to the app itself; `AGENTNET_WEB_ALLOW=192.0.2.0/24`
+   narrows it to one range. The connection is plain HTTP, so the token crosses the network unencrypted: use it only on
+   a network you trust, and keep port 7420 closed to the internet. Turn it off again with
+   `AGENTNET_WEB=off bash install.sh --headless`.
+
+   Everything the app does is also available in the terminal: `agentnet` alone opens a live console (agents, what
+   needs you, to-dos; `?` lists its keys), and `agentnet help` lists the commands. `agentnet completion install` adds
+   Tab-completion.
 7. Check everything with `bash ~/.local/share/agentnet/install.sh doctor`.
 
 To make the server part of a home Net with your other machines, see "Several machines" in the [manual](manual.md).
